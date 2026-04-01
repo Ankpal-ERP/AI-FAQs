@@ -24,18 +24,13 @@ Ensure you have [uv](https://docs.astral.sh/uv/) installed on your machine. We u
 
 ### Installation & Running
 
-1. **Clone/Navigate** to the project directory:
-   ```bash
-   cd AIRoutes
-   ```
-
-2. **Run the Streamlit App:**
+1. **Run the Streamlit App:**
    ```bash
    uv run streamlit run app.py
    ```
    *`uv` will automatically read `pyproject.toml` (or `requirements.txt`), create a virtual environment, install the required packages (Streamlit, LiteLLM, Pydantic), and start the server.*
 
-3. Open your browser to `http://localhost:8501`.
+2. Open your browser to `http://localhost:8501`.
 
 ---
 
@@ -55,16 +50,10 @@ Ensure you have [uv](https://docs.astral.sh/uv/) installed on your machine. We u
 | File | Purpose |
 | ---- | ------- |
 | **`app.py`** | The main Streamlit dashboard UI. |
-| **`agent.py`** | Contains the core `run_agentic_faq_generation` orchestrator that manages tool calls, API interaction, and system prompts. |
-| **`tools.py`** | The Python functions the agent uses to interact with the host OS (`read_file`, `search_code`). |
-| **`tools.json`** | The externalized JSON schema that defines what tools the Agent is allowed to use. |
-| **`response_parser.py`** | Advanced fallback interceptor that catches raw XML/JSON output from open-source models and forces them to work like native tool calls. |
+| **`core/agent.py`** | Contains the core `run_agentic_faq_generation` orchestrator that manages tool calls, API interaction, and system prompts. |
+| **`core/response_parser.py`** | Advanced fallback interceptor that catches raw XML/JSON output from open-source models and forces them to work like native tool calls. |
+| **`tools/executor.py`** | The Python functions the agent uses to interact with the host OS (`read_file`, `search_code`). |
+| **`tools/tools.json`** | The externalized JSON schema that defines what tools the Agent is allowed to use. |
+| **`ui/styles.py`** | Extracted styling logic for the UI. |
 
 ---
-
-## 🔧 Extending the Tools
-
-Want to give the Agent a new capability?
-1. Open `tools.json` and add the JSON schema for your new tool.
-2. Open `tools.py` and write the Python function to execute that capability.
-3. Add the mapping inside the `execute_tool` function in `tools.py`.
