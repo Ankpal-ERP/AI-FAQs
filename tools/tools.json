@@ -1,0 +1,66 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "Lists the contents of a directory. Returns file names and their absolute paths.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute path to the directory"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Reads the content of a file. Use this after finding an interesting file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute path to the file"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_code",
+        "description": "Searches for a specific keyword or regex in a directory.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Keyword or regex to search for"
+            },
+            "path": {
+              "type": "string",
+              "description": "Absolute path to the directory to search in"
+            }
+          },
+          "required": [
+            "query",
+            "path"
+          ]
+        }
+      }
+    }
+  ]
+}
