@@ -35,76 +35,111 @@ with st.sidebar:
 
 # ── Hero Header ──
 st.markdown('<div class="hero-title">FAQ Helper</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">Automatically explore your codebase and generate context-aware FAQs for your end users.</div>', unsafe_allow_html=True)
-
+st.markdown('<div class="hero-sub">Automatically explore your codebase and generate context-aware FAQs for your projects.</div>', unsafe_allow_html=True)
 
 # ── Step 1: Project Setup ──
 st.markdown("""
 <div class="step-header">
     <div class="step-badge step-badge-active">1</div>
-    <div class="step-title">Project Setup</div>
+    <div class="step-title">Project Context</div>
 </div>
 """, unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    project_name = st.text_input("Project Name", value="", help="Injected as context header into every AI prompt.")
-with col2:
-    about = st.text_area("About / Description", value="", height=100, help="Be as descriptive as possible — the AI reads this before generating FAQs.")
-
-extra_prompt = st.text_area(
-    "Additional Instructions (Optional)",
-    value="",
-    height=80,
-    placeholder="e.g. Focus on billing-related features, ignore test files, generate FAQs in Hindi...",
-    help="Any extra context or instructions you want the AI to follow during generation."
+project_name = st.text_input("Project Name", value=st.session_state.get('project_name', ""), help="Context header for AI.")
+about = st.text_input(
+    "Overall Project Mission", 
+    value=st.session_state.get('about', ""), 
+    placeholder="e.g. ERP for business management...",
+    help="General business goal."
 )
 
+col_fe, col_be = st.columns(2)
+with col_fe:
+    st.markdown("##### 🎨 Frontend")
+    fe_context = st.text_area("Structure Mapping", value=st.session_state.get('fe_context', ""), height=80, key="fe_ctx")
+    fe_folders_str = st.text_area("FE Folders (Target)", value=st.session_state.get('fe_folders_str', ""), height=68, key="fe_folders")
 
-# ── Step 2: Source Folders ──
+with col_be:
+    st.markdown("##### ⚙️ Backend")
+    be_context = st.text_area("Structure Mapping", value=st.session_state.get('be_context', ""), height=80, key="be_ctx")
+    be_folders_str = st.text_area("BE Folders (Source)", value=st.session_state.get('be_folders_str', ""), height=68, key="be_folders")
+
+extra_prompt = st.text_input(
+    "Additional Generation Instructions (Optional)",
+    value=st.session_state.get('extra_prompt', ""),
+    key="gen_extra"
+)
+
+# ── Step 2: Route Discovery ──
 st.markdown("""
 <div class="step-header">
     <div class="step-badge step-badge-active">2</div>
-    <div class="step-title">Source Folders</div>
+    <div class="step-title">Fetch & Select Routes</div>
 </div>
 """, unsafe_allow_html=True)
 
-target_paths_str = st.text_area(
-    "Absolute Folder Paths (one per line)", 
-    value="",
-    height=80,
-    help="The AI agent will use search_code + read_file inside these directories."
-)
+routes_file = st.text_input("Routes / Manifest File (Optional)", value=st.session_state.get('routes_file', ""))
 
-target_list_preview = [p.strip() for p in target_paths_str.split('\n') if p.strip()]
-if target_list_preview:
-    valid_count = 0
-    invalid_dirs = []
-    for p in target_list_preview:
-        if os.path.isdir(p):
-            valid_count += 1
-        else:
-            invalid_dirs.append(p)
-            
-    if invalid_dirs:
-        for ip in invalid_dirs:
-            st.error(f"Directory not found on disk: `{ip}`", icon="🚨")
-    elif valid_count > 0:
-        st.success(f"{valid_count} valid directory/directories targeted.", icon="✅")
+fetch_col1, fetch_col2 = st.columns([1, 4])
+with fetch_col1:
+    fetch_clicked = st.button("🔍 Fetch Routes", type="secondary", use_container_width=True)
+with fetch_col2:
+    if st.button("🗑️ Clear All Progress", use_container_width=True):
+        if os.path.exists("faqs.json"): os.remove("faqs.json")
+        if os.path.exists("routes.json"): os.remove("routes.json")
+        st.session_state.discovered_routes = []
+        st.rerun()
 
-routes_file = st.text_input(
-    "Routes / Manifest File (Optional)",
-    value="",
-    placeholder="e.g. /home/user/project/client/src/router/index.ts",
-    help="Path to a routes file, menu config, or any manifest that maps all pages/features. The agent reads this first to understand the full app structure before exploring."
-)
+# Persistence logic
+if 'discovered_routes' not in st.session_state:
+    st.session_state.discovered_routes = []
+    if os.path.exists("routes.json"):
+        try:
+            with open("routes.json", "r") as f:
+                st.session_state.discovered_routes = json.load(f)
+        except: pass
 
-if routes_file:
-    if os.path.isfile(routes_file):
-        st.success(f"Manifest file found.", icon="📄")
-    else:
-        st.error(f"File not found: `{routes_file}`", icon="🚨")
+def get_completed_routes():
+    if os.path.exists("faqs.json"):
+        try:
+            with open("faqs.json", "r") as f:
+                data = json.load(f)
+                return list(set(faq.get("source_path") for faq in data.get("faqs", []) if faq.get("source_path")))
+        except: pass
+    return []
 
+if fetch_clicked:
+    from core.agent import discover_routes
+    fe_list = [p.strip() for p in fe_folders_str.split('\n') if p.strip()]
+    full_model = f"{provider}/{model_name}" if provider else model_name
+    
+    with st.spinner("Discovering Frontend routes..."):
+        routes = discover_routes(
+            model=full_model,
+            api_key=api_key,
+            api_base=api_base,
+            project_name=project_name,
+            about=about,
+            fe_context=fe_context,
+            fe_folders=fe_list,
+            routes_file=routes_file
+        )
+        st.session_state.discovered_routes = routes
+        with open("routes.json", "w") as f:
+            json.dump(routes, f)
+        st.success(f"Successfully discovered {len(routes)} routes.")
+        st.rerun()
+
+completed_routes = get_completed_routes()
+
+if st.session_state.discovered_routes:
+    st.markdown("### 📊 Route Status")
+    cols = st.columns(2)
+    for i, route in enumerate(st.session_state.discovered_routes):
+        is_done = route in completed_routes
+        label = f"✅ {os.path.basename(route)}" if is_done else f"⏳ {os.path.basename(route)}"
+        # Checkboxes are now passive status indicators
+        cols[i % 2].checkbox(label, value=is_done, disabled=True, key=f"status_{route}")
 
 # ── Step 3: Generate ──
 st.markdown("""
@@ -114,130 +149,107 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-generate_clicked = st.button("🚀 Run Agentic FAQ Generation", type="primary", use_container_width=True)
+gen_col, stop_col = st.columns([3, 1])
 
-if generate_clicked:
-    from core.agent import run_agentic_faq_generation
+# Generate button
+with gen_col:
+    run_gen = st.button("🚀 Run Agentic FAQ Generation", type="primary", use_container_width=True)
+
+# Stop button
+with stop_col:
+    if st.button("🛑 Stop", type="secondary", use_container_width=True):
+        with open("stop_flag", "w") as f: f.write("stop")
+        st.info("Stopping after current route finishes...")
+
+if run_gen:
+    from core.agent import generate_faqs_for_route
     
-    target_list = [p.strip() for p in target_paths_str.split('\n') if p.strip()]
-    full_model_name = f"{provider}/{model_name}" if provider else model_name
+    # Remove any old stop flag before starting
+    if os.path.exists("stop_flag"): os.remove("stop_flag")
     
-    if not full_model_name:
-        st.error("Please provide a Model Name in the sidebar.")
-    elif not target_list:
-        st.error("Please provide at least one target folder.")
+    if not st.session_state.discovered_routes:
+        st.warning("Please fetch routes first in Step 2!")
     else:
-        with st.status(f"🤖 Agent running with `{full_model_name}`...", expanded=True) as status:
-            start_time = time.time()
-            final_json_str = run_agentic_faq_generation(
-                model=full_model_name,
-                api_key=api_key,
-                api_base=api_base,
-                project_name=project_name,
-                about=about,
-                target_folders=target_list,
-                extra_prompt=extra_prompt,
-                routes_file=routes_file
-            )
-            elapsed = round(time.time() - start_time, 1)
-            status.update(label=f"✅ Complete in {elapsed}s", state="complete", expanded=False)
+        pending_routes = [r for r in st.session_state.discovered_routes if r not in completed_routes]
         
-        # ── Step 4: Display Results ──
-        st.markdown("""
-        <div class="step-header">
-            <div class="step-badge step-badge-done">✓</div>
-            <div class="step-title">Generated FAQs</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        try:
-            import re
-            clean_json = final_json_str.strip()
+        if not pending_routes:
+            st.success("All discovered routes are already complete!")
+        else:
+            full_model = f"{provider}/{model_name}" if provider else model_name
+            fe_ctx, be_ctx = fe_context, be_context
+            be_list = [p.strip() for p in be_folders_str.split('\n') if p.strip()]
             
-            # Find the JSON block if it's wrapped in markdown
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', clean_json, re.DOTALL)
-            if json_match:
-                clean_json = json_match.group(1).strip()
-            else:
-                # If no markdown block, try to find the first { and last }
-                start_idx = clean_json.find('{')
-                end_idx = clean_json.rfind('}')
-                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    clean_json = clean_json[start_idx:end_idx+1].strip()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, route in enumerate(pending_routes):
+                # CHECK FOR STOP SIGNAL
+                if os.path.exists("stop_flag"):
+                    os.remove("stop_flag")
+                    st.warning("🛑 Generation stopped by user.")
+                    break
+
+                status_text.markdown(f"**🤖 AI is analyzing [{idx+1}/{len(pending_routes)}]:** `{os.path.basename(route)}` ...")
                 
-            data = json.loads(clean_json)
-            faqs = data.get("faqs", [])
-            
-            # Metrics
-            categories = list(set(f.get("category", "General") for f in faqs))
-            st.markdown(f"""
-            <div class="metrics-row">
-                <div class="metric-card">
-                    <div class="metric-value">{len(faqs)}</div>
-                    <div class="metric-label">FAQs Generated</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{len(categories)}</div>
-                    <div class="metric-label">Categories</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{elapsed}s</div>
-                    <div class="metric-label">Time Taken</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Color map for categories
-            colors = ["cat-teal", "cat-blue", "cat-amber", "cat-purple", "cat-red"]
-            cat_color_map = {cat: colors[i % len(colors)] for i, cat in enumerate(categories)}
-            
-            # FAQ Cards
-            for faq in faqs:
-                cat = faq.get("category", "General")
-                color_class = cat_color_map.get(cat, "cat-blue")
-                st.markdown(f"""
-                <div class="faq-card">
-                    <div class="faq-q">
-                        {faq.get('question', '')}
-                        <span class="cat-badge {color_class}">{cat}</span>
-                    </div>
-                    <div class="faq-a">{faq.get('answer', '')}</div>
-                    <div class="faq-source">📄 Source: {faq.get('source', 'N/A')}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Download Buttons
-            st.markdown("---")
-            dl_col1, dl_col2, dl_col3 = st.columns(3)
-            with dl_col1:
-                st.download_button(
-                    "📥 Download JSON",
-                    data=json.dumps(data, indent=2),
-                    file_name=f"{project_name}_faqs.json",
-                    mime="application/json",
-                    use_container_width=True
+                new_data = generate_faqs_for_route(
+                    model=full_model,
+                    api_key=api_key,
+                    api_base=api_base,
+                    project_name=project_name,
+                    about=about,
+                    fe_context=fe_ctx,
+                    be_context=be_ctx,
+                    be_folders=be_list,
+                    route_path=route,
+                    extra_prompt=extra_prompt
                 )
-            with dl_col2:
-                # Generate Markdown
-                md_lines = [f"# {project_name} — FAQ\n"]
-                for cat in categories:
-                    md_lines.append(f"\n## {cat}\n")
-                    for faq in faqs:
-                        if faq.get("category") == cat:
-                            md_lines.append(f"### {faq.get('question', '')}\n")
-                            md_lines.append(f"{faq.get('answer', '')}\n")
-                            md_lines.append(f"*Source: {faq.get('source', 'N/A')}*\n")
-                md_content = "\n".join(md_lines)
-                st.download_button(
-                    "📥 Download Markdown",
-                    data=md_content,
-                    file_name=f"{project_name}_faqs.md",
-                    mime="text/markdown",
-                    use_container_width=True
-                )
-            with dl_col3:
-                st.button("🔄 Regenerate", use_container_width=True)
-                    
-        except Exception as e:
-            st.warning("⚠️ Could not parse agent's response as valid JSON.")
-            st.code(final_json_str, language="text")
+                
+                # Atomic Read-Merge-Write
+                current_all = {"faqs": []}
+                if os.path.exists("faqs.json"):
+                    try:
+                        with open("faqs.json", "r") as f: current_all = json.load(f)
+                    except: pass
+                
+                if "faqs" in new_data:
+                    for f in new_data["faqs"]: f["source_path"] = route
+                    current_all["faqs"].extend(new_data["faqs"])
+                    with open("faqs.json", "w") as f: json.dump(current_all, f, indent=2)
+                
+                # Update progress bar
+                progress_bar.progress((idx + 1) / len(pending_routes))
+            
+            st.success("Batch process finished or stopped.")
+            time.sleep(1)
+            st.rerun() # Refresh once all are done (or stopped)
+
+# ── Display Final Results ──
+if os.path.exists("faqs.json"):
+    try:
+        with open("faqs.json", "r") as f:
+            final_data = json.load(f)
+            faqs = final_data.get("faqs", [])
+            
+            if faqs:
+                st.markdown("---")
+                st.markdown("## 📊 Consolidated FAQs")
+                
+                # Metrics
+                categories = list(set(f.get("category", "General") for f in faqs))
+                st.markdown(f"**Found {len(faqs)} FAQs across {len(categories)} features.**")
+                
+                for faq in faqs:
+                    with st.expander(f"❓ {faq.get('question')}"):
+                        st.write(faq.get('answer'))
+                        st.caption(f"Source: {faq.get('source')}")
+                
+                dl1, dl2 = st.columns(2)
+                dl1.download_button("📥 Download JSON", data=json.dumps(final_data, indent=2), file_name="faqs.json", mime="application/json")
+                
+                md_output = f"# {project_name} FAQ\n\n"
+                for f in faqs:
+                    md_output += f"### {f.get('question')}\n{f.get('answer')}\n*Source: {f.get('source')}*\n\n"
+                dl2.download_button("📥 Download Markdown", data=md_output, file_name="faqs.md", mime="text/markdown")
+    except Exception as e:
+        st.warning(f"⚠️ Error displaying FAQs: {e}")
+

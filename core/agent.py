@@ -1,17 +1,26 @@
 import json
 import logging
+import re
 from litellm import completion
 from tools.executor import execute_tool, TOOLS_SCHEMA, list_dir, read_file, search_code
 from core.response_parser import parse_tool_calls_from_content, strip_tool_call_tags
 import streamlit as st
+import os
 
-logging.basicConfig(level=logging.INFO)
-
+# ── Logging Setup ──
+# Configure logging to point exclusively to the console (StreamHandler).
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger("AIRoutes")
 
 def _execute_parsed_tool(parsed_call: dict) -> dict:
-    """Execute a tool call that was parsed from raw text content (not OpenAI format)."""
     name = parsed_call.get("name", "")
     args = parsed_call.get("arguments", {})
+    
+    logger.info(f"🛠️ [TOOL EXECUTE] {name} | Args: {args}")
     
     if name == "list_dir":
         return list_dir(args.get("path", ""))
@@ -22,183 +31,157 @@ def _execute_parsed_tool(parsed_call: dict) -> dict:
     else:
         return {"error": f"Unknown tool: {name}"}
 
+def _run_agent_loop(model, api_key, api_base, messages, max_loops=10):
+    """The central agentic execution engine with terminal-only logging."""
+    
+    logger.info("="*60)
+    logger.info(f"🚀 MISSION START | Model: {model}")
+    logger.info(f"PROMPT SUMMARY: {messages[0]['content'][:200]}...")
+    logger.info("="*60)
 
-def run_agentic_faq_generation(
-    model: str,
-    api_key: str,
-    api_base: str,
-    project_name: str,
-    about: str,
-    target_folders: list[str],
-    extra_prompt: str = "",
-    routes_file: str = "",
-):
-    # ── Read routes/manifest file if provided ──
-    routes_context = ""
-    if routes_file:
+    for i in range(max_loops):
         try:
-            from pathlib import Path
-            rf = Path(routes_file)
-            if rf.is_file():
-                raw = rf.read_text(encoding="utf-8", errors="replace")
-                # Truncate if too large (keep first 40k chars)
-                if len(raw) > 40000:
-                    raw = raw[:40000] + "\n\n... [truncated] ..."
-                routes_context = raw
-                st.write(f"📄 Loaded routes manifest: `{routes_file}` ({len(raw)} chars)")
+            params = {
+                "model": model,  # This must be the full "provider/model" string
+                "messages": messages,
+                "temperature": 0.2,
+                "extra_body": {"model": model} # Some providers expect the full name here too
+            }
+            if api_key: params["api_key"] = api_key
+            if api_base: params["base_url"] = api_base
+            
+            response = completion(**params)
+            ai_msg = response.choices[0].message
+            content = ai_msg.content or ""
+            messages.append({"role": "assistant", "content": content})
+            
+            # Print AI thought/output briefly to terminal
+            display_content = content[:150].replace('\n', ' ')
+            logger.info(f"🤖 [LOOP {i+1}] AI Response: {display_content}...")
+
+            # Pattern for tool extraction (adjust if your model uses XML or different tags)
+            # We'll support both standard LiteLLM tool_calls and manual JSON yield patterns
+            if hasattr(ai_msg, 'tool_calls') and ai_msg.tool_calls:
+                for tc in ai_msg.tool_calls:
+                    tool_json = {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
+                    result = _execute_parsed_tool(tool_json)
+                    messages.append({
+                        "role": "tool",
+                        "name": tc.function.name,
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(result)
+                    })
+                logger.info(f"✅ Tools executed and returned to AI context.")
+                continue
+
+            # Check for manual JSON yield pattern if model doesn't use tool_calls properly
+            tool_match = re.search(r'YIELD TOOL CALL:\s*({.*})', content, re.DOTALL)
+            if tool_match:
+                try:
+                    tool_json = json.loads(tool_match.group(1))
+                    result = _execute_parsed_tool(tool_json)
+                    messages.append({"role": "user", "content": f"TOOL RESULT:\n{json.dumps(result, indent=2)}"})
+                    logger.info(f"✅ Manual Tool result added to context.")
+                    continue
+                except:
+                    pass
+            
+            # If no tools called, we assume the mission is complete
+            logger.info(f"🏆 Mission Complete in {i+1} loops.")
+            return content
+            
         except Exception as e:
-            st.warning(f"Could not read routes file: {e}")
+            logger.error(f"❌ Error in loop {i+1}: {e}")
+            return str(e)
+            
+    return messages[-1]["content"]
 
-    system_prompt = f"""You are an expert Customer Support Specialist and Technical Writer.
-Your goal is to explore the provided software repository and generate a comprehensive FAQ for the END USERS of the application.
+def discover_routes(model, api_key, api_base, project_name, about, fe_context, fe_folders, routes_file):
+    """Phase 1: Agent identifies all UI page/component files."""
+    
+    routes_raw = ""
+    if routes_file and os.path.isfile(routes_file):
+        try:
+            routes_raw = f"\n\nUser-provided Routes File Content (Manifest):\n```\n{open(routes_file).read()[:30000]}\n```"
+        except: pass
 
-Project Name: {project_name}
-About: {about}
-Root Target Folders to Search: {', '.join(target_folders)}
+    system_prompt = f"""You are a Senior Architect analyzing the '{project_name}' project.
+PROJECT MISSION:
+{about}
 
-CRITICAL STRATEGY:
-- Do NOT waste iterations just listing directories one by one. 
-- FIRST, call search_code to find key patterns like "error", "validation", "required", "button", "submit", "login", "password", "invoice", "permission" across the root folders.
-- THEN, call read_file on the most interesting files found by search_code.
-- Use list_dir ONLY ONCE at the root level if needed, never drill down folder by folder.
-- You have a maximum of 12 tool calls. Use them wisely.
+FRONTEND STRUCTURE & MAPPING:
+{fe_context}
 
-After gathering enough information, produce the final output as valid JSON with this schema:
+TARGET FRONTEND FOLDERS: {', '.join(fe_folders)}
+{routes_raw}
+
+YOUR TASK:
+Identify ALL key frontend page/component files (.vue, .tsx, .jsx) that represent unique end-user features.
+Output a PURE JSON list of absolute file paths:
+[
+  "/path/to/Page1.vue",
+  "/path/to/Page2.vue"
+]
+Only output the JSON array. Do not hallucinate.
 """
-
-    if extra_prompt:
-        system_prompt += f"\n\nADDITIONAL USER INSTRUCTIONS:\n{extra_prompt}\n"
-
-    schema_example = """
-{
-    "faqs": [
-        {
-            "category": "Topic Name",
-            "question": "User-friendly Question",
-            "answer": "Helpful non-technical answer",
-            "source": "File where this was discovered"
-        }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Discovery all unique feature page files and return the JSON array."}
     ]
-}
+    
+    raw_json = _run_agent_loop(model, api_key, api_base, messages, max_loops=5)
+    try:
+        import re
+        match = re.search(r'\[.*\]', raw_json, re.DOTALL)
+        return json.loads(match.group(0)) if match else json.loads(raw_json)
+    except:
+        return []
 
-IMPORTANT: 
-- DO NOT guess or hallucinate. Base everything on code found via your tools.
-- When you output the final JSON, do not include ANY text or tool calls outside the JSON.
-- Do not call any tools once you are generating the final JSON.
-- Generate at least 5-10 FAQs.
+def generate_faqs_for_route(model, api_key, api_base, project_name, about, fe_context, be_context, be_folders, route_path, extra_prompt):
+    """Phase 2: Agent traces a single route into the backend and writes FAQs."""
+    
+    system_prompt = f"""You are a Senior Product Expert and User Documentation Lead for '{project_name}'.
+PROJECT MISSION:
+{about}
+
+TECHNICAL BACKGROUND (Internal Use Only):
+FE Context: {fe_context}
+BE Context: {be_context}
+BE Folders: {', '.join(be_folders)}
+
+YOUR MISSION:
+Analyze the feature at {route_path} and its backend logic to generate 2-4 professional, high-quality FAQs for an END-USER.
+
+STRICT CONTENT RULES:
+1. NO TECHNICAL JARGON: Never mention '.vue', '.ts', 'API endpoints', 'decorators', 'models', 'controllers', or 'database columns' in the questions or answers.
+2. USER-CENTRIC: Focus on the business value. Explain 'What can I do here?' and 'What are the rules?'.
+3. BACKEND INSIGHTS: Use the backend code you find to explain REAL constraints (e.g., 'You cannot delete a category if it has active products').
+4. PERSONA: Write like a helpful Product Manager, not a developer.
+
+JSON SCHEMA:
+{{
+  "faqs": [
+    {{
+      "category": "Feature Name (e.g. Sales Invoicing)",
+      "question": "Clear, user-friendly question?",
+      "answer": "Professional, business-focused answer derived from your code analysis.",
+      "source": "{os.path.basename(route_path)}"
+    }}
+  ]
+}}
 """
-    full_system = system_prompt + schema_example
-
-    # ── Build initial user message ──
-    user_msg = "Please begin exploring the target folders with your tools and generate the final JSON FAQ."
-    if routes_context:
-        user_msg = f"""I have provided a routes/manifest file that maps out the entire application structure. Study it carefully to understand all the features, pages, and modules before you start exploring.
-
-ROUTES / MANIFEST FILE CONTENT:
-```
-{routes_context}
-```
-
-Now use this as your guide. Call read_file on the most important component files listed in the routes to understand what each feature does, then generate the final JSON FAQ."""
+    if extra_prompt:
+        system_prompt += f"\nAdditional Instructions: {extra_prompt}"
 
     messages = [
-        {"role": "system", "content": full_system},
-        {"role": "user", "content": user_msg}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Analyze {route_path} and its backend dependencies, then output the FAQs JSON."}
     ]
     
-    st.info(f"Starting Agent logic with: {model}")
-    max_loops = 15
-    generated_json = None
-    
-    completion_args = {
-        "model": model,
-        "messages": messages,
-        "tools": TOOLS_SCHEMA,
-        "temperature": 0.7,
-        "extra_body": {"model": model}
-    }
-    
-    if api_key:
-        completion_args["api_key"] = api_key
-    if api_base:
-        if not api_base.endswith("/v1"):
-            api_base = api_base.rstrip("/") + "/v1"
-        completion_args["api_base"] = api_base
-    
-    for i in range(max_loops):
-        st.write(f"**Agent Iteration {i+1}**")
-        response = completion(**completion_args)
-        
-        response_message = response.choices[0].message
-        content = response_message.content or ""
-        
-        # ── Check 1: Standard OpenAI tool_calls ──
-        if response_message.tool_calls:
-            messages.append(response_message)
-            for tool_call in response_message.tool_calls:
-                st.write(f"🤖 Tool: `{tool_call.function.name}` | Args: `{tool_call.function.arguments}`")
-                
-                tool_result = execute_tool(tool_call)
-                st.write(f"📥 Returned {len(str(tool_result))} chars")
-                
-                messages.append({
-                    "role": "tool",
-                    "name": tool_call.function.name,
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(tool_result)
-                })
-            continue
-        
-        # ── Check 2: Parse tool calls from raw text (Qwen/Nemotron XML format) ──
-        parsed_calls = parse_tool_calls_from_content(content)
-        if parsed_calls:
-            messages.append({"role": "assistant", "content": content})
-            
-            for pc in parsed_calls:
-                tool_name = pc["name"]
-                tool_args = pc["arguments"]
-                st.write(f"🤖 Tool (parsed): `{tool_name}` | Args: `{json.dumps(tool_args)}`")
-                
-                tool_result = _execute_parsed_tool(pc)
-                st.write(f"📥 Returned {len(str(tool_result))} chars")
-                
-                messages.append({
-                    "role": "user",
-                    "content": f"Tool Result for {tool_name}:\n{json.dumps(tool_result)}"
-                })
-            continue
-        
-        # ── Check 3: No tool calls → this is the final answer ──
-        # Strip any leftover tool call tags just in case
-        clean_content = strip_tool_call_tags(content)
-        if clean_content:
-            generated_json = clean_content
-            st.success("FAQ Generation Complete!")
-            break
-        else:
-            # Empty response, push for answer
-            messages.append({"role": "assistant", "content": content})
-            messages.append({"role": "user", "content": "Please output the final JSON FAQ now based on everything you have gathered."})
-            continue
-
-    if not generated_json:
-        st.warning("Max loops reached, forcing final answer.")
-        final_prompt = messages.copy()
-        final_prompt.append({"role": "user", "content": "STOP calling tools. Output the final JSON result NOW based on all findings so far. No tool calls, only JSON."})
-        
-        fallback_args = {
-            "model": model,
-            "messages": final_prompt,
-            "temperature": 0.2,
-            "extra_body": {"model": model}
-        }
-        if api_key:
-            fallback_args["api_key"] = api_key
-        if api_base:
-            fallback_args["api_base"] = api_base
-            
-        response = completion(**fallback_args)
-        raw = response.choices[0].message.content or ""
-        generated_json = strip_tool_call_tags(raw)
-        
-    return generated_json
+    raw_json = _run_agent_loop(model, api_key, api_base, messages, max_loops=12)
+    try:
+        import re
+        match = re.search(r'\{.*\}', raw_json, re.DOTALL)
+        return json.loads(match.group(0)) if match else json.loads(raw_json)
+    except:
+        return {"faqs": []}
