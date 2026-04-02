@@ -7,11 +7,11 @@ import logging
 import hashlib
 from datetime import datetime
 
-logger = logging.getLogger("AIRoutes")
+logger = logging.getLogger("AI-Faqs")
 
 # ── Page Config ──
 st.set_page_config(
-    page_title="FAQ Helper · Agentic AI",
+    page_title="AI-Faqs · Agentic AI",
     page_icon="💡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -576,8 +576,8 @@ def _render_route_grid(routes, completed, faqs_file_path):
 with st.sidebar:
     st.markdown("""
     <div style="padding: 1rem 0 0.5rem">
-        <div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.15em;color:#444466;text-transform:uppercase;margin-bottom:8px">FAQ Helper</div>
-        <div style="font-size:1.25rem;font-weight:600;color:#e0e0f5;letter-spacing:-0.01em">Agentic AI</div>
+        <div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.15em;color:#444466;text-transform:uppercase;margin-bottom:8px">AI-Faqs</div>
+        <div style="font-size:1.25rem;font-weight:600;color:#e0e0f5;letter-spacing:-0.01em">Agentic AI Engine</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -744,9 +744,9 @@ with st.sidebar:
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-wrap">
-    <div class="hero-eyebrow">Agentic Documentation Tool</div>
-    <div class="hero-title">FAQ <span>Helper</span></div>
-    <div class="hero-sub">Autonomously explore your codebase and generate context-aware, user-friendly FAQs — powered by any LLM.</div>
+    <div class="hero-eyebrow">Agentic Documentation Engine</div>
+    <div class="hero-title">AI-<span>Faqs</span></div>
+    <div class="hero-sub">Autonomously explore your codebase and generate context-aware, user-friendly documentation — powered by Agentic AI.</div>
 </div>
 """, unsafe_allow_html=True)
 

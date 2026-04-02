@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger("AIRoutes")
+logger = logging.getLogger("AI-Faqs")
 
 # ── Path Sandboxing ──────────────────────────────────────────────────────────
 _PROJECT_ROOT: Optional[str] = None

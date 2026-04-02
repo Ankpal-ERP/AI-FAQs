@@ -10,7 +10,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler()],
 )
-logger = logging.getLogger("AIRoutes")
+logger = logging.getLogger("AI-Faqs")
 
 MAX_CONTEXT_CHARS = 120_000
 

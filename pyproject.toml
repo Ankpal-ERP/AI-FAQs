@@ -1,5 +1,5 @@
 [project]
-name = "airoutes"
+name = "ai-faqs"
 version = "0.1.0"
 description = "Agentic AI tool that autonomously explores codebases to generate end-user FAQ documentation"
 readme = "README.md"
