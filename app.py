@@ -34,8 +34,8 @@ header {visibility: hidden;}
 
 /* ─── Sidebar ─── */
 [data-testid="stSidebar"] {
-    background: #0a0a0f;
-    border-right: 1px solid #1e1e2e;
+    background: #0a0a0f !important;
+    border-right: 1px solid #1e1e2e !important;
 }
 [data-testid="stSidebar"] * { color: #c8c8d8 !important; }
 [data-testid="stSidebar"] .stTextInput label {
