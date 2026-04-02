@@ -7,3 +7,6 @@ faqs.json
 routes.json
 stop_flag
 ai_logs.log
+
+# Project Sessions (auto-generated session data)
+projects/

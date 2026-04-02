@@ -4,6 +4,8 @@ import time
 import os
 import tempfile
 import logging
+import hashlib
+from datetime import datetime
 
 logger = logging.getLogger("AIRoutes")
 
@@ -189,44 +191,37 @@ header {visibility: hidden;}
 }
 
 /* ─── Status Grid ─── */
-.route-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 8px;
+.route-grid-wrapper {
     margin: 1rem 0;
 }
-.route-pill {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0.55rem 0.85rem;
-    border-radius: 8px;
-    font-size: 0.92rem;
-    font-family: 'DM Mono', monospace;
-    border: 1px solid;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.route-grid-wrapper .stButton > button {
+    border-radius: 8px !important;
+    font-size: 0.92rem !important;
+    font-family: 'DM Mono', monospace !important;
+    padding: 0.55rem 0.85rem !important;
+    transition: all 0.15s ease !important;
+    border: 1px solid !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
 }
-.route-pill.done {
-    background: #f0faf5;
-    border-color: #a8ddc0;
-    color: #1a6040;
+.route-grid-wrapper .stButton > button[kind="primary"] {
+    background: #f0faf5 !important;
+    border-color: #a8ddc0 !important;
+    color: #1a6040 !important;
 }
-.route-pill.pending {
-    background: #f8f8fd;
-    border-color: #dcdcee;
-    color: #6060a0;
+.route-grid-wrapper .stButton > button[kind="primary"]:hover {
+    background: #e0f5f0 !important;
+    border-color: #88ccaa !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.08) !important;
 }
-.route-pill.active {
-    background: #f0f0ff;
-    border-color: #a0a0ff;
-    color: #3030aa;
-    animation: pulse-border 1.5s ease-in-out infinite;
-}
-@keyframes pulse-border {
-    0%, 100% { border-color: #a0a0ff; }
-    50% { border-color: #5555ff; }
+.route-grid-wrapper .stButton > button[kind="secondary"]:disabled {
+    background: #f8f8fd !important;
+    border-color: #dcdcee !important;
+    color: #6060a0 !important;
+    opacity: 0.7 !important;
+    cursor: not-allowed !important;
 }
 
 /* ─── Stats Bar ─── */
@@ -410,6 +405,37 @@ hr { border: none; border-top: 1px solid #ededf5; margin: 1.5rem 0; }
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+def _get_project_slug(project_name: str) -> str:
+    """Generate a safe slug from project name for file naming."""
+    slug = project_name.lower().strip()
+    slug = "".join(c if c.isalnum() or c == "-" else "-" for c in slug)
+    slug = "-".join(filter(None, slug.split("-")))
+    return slug
+
+
+def _get_project_files_dir(project_name: str) -> str:
+    """Get/create directory for project-specific files."""
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+    project_dir = os.path.join(base_dir, project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    return project_dir
+
+
+def _get_project_file_paths(project_name: str):
+    """Get file paths for a specific project (one session per project)."""
+    if not project_name:
+        # Fallback to old behavior if no project name
+        return "routes.json", "faqs.json", None
+    
+    project_dir = _get_project_files_dir(project_name)
+    slug = _get_project_slug(project_name)
+    routes_file = os.path.join(project_dir, f"{slug}_routes.json")
+    faqs_file = os.path.join(project_dir, f"{slug}_faqs.json")
+    config_file = os.path.join(project_dir, f"{slug}_config.json")
+    
+    return routes_file, faqs_file, config_file
+
+
 def _atomic_write_json(filepath: str, data) -> None:
     dir_name = os.path.dirname(os.path.abspath(filepath))
     try:
@@ -461,8 +487,10 @@ def _is_stopped() -> bool:
     return os.path.exists("stop_flag")
 
 
-def get_completed_routes():
-    data = _safe_load_json("faqs.json", default={"faqs": []})
+def get_completed_routes(faqs_file: str = None):
+    if faqs_file is None:
+        faqs_file = "faqs.json"
+    data = _safe_load_json(faqs_file, default={"faqs": []})
     return list(
         set(
             faq.get("source_path")
@@ -472,21 +500,76 @@ def get_completed_routes():
     )
 
 
-def _render_route_grid(routes, completed, active=None):
-    pills = ""
-    for r in routes:
-        name = os.path.basename(r)
-        if r == active:
-            cls = "active"
-            icon = "⚡"
-        elif r in completed:
-            cls = "done"
-            icon = "✓"
-        else:
-            cls = "pending"
-            icon = "·"
-        pills += f'<div class="route-pill {cls}" title="{r}">{icon} {name}</div>'
-    st.markdown(f'<div class="route-grid">{pills}</div>', unsafe_allow_html=True)
+def _save_project_config(config_file: str, config_data: dict) -> None:
+    """Save project configuration to file."""
+    if config_file:
+        _atomic_write_json(config_file, config_data)
+
+
+def _load_project_config(config_file: str, default=None) -> dict:
+    """Load project configuration from file."""
+    if default is None:
+        default = {}
+    if not config_file or not os.path.exists(config_file):
+        return default
+    return _safe_load_json(config_file, default)
+
+
+def _load_existing_projects() -> list:
+    """Load all existing projects (one session per project)."""
+    projects_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+    if not os.path.exists(projects_dir):
+        return []
+    
+    projects = []
+    for project_name in sorted(os.listdir(projects_dir)):
+        project_dir = os.path.join(projects_dir, project_name)
+        if os.path.isdir(project_dir):
+            # Count JSON files in project directory
+            json_files = [f for f in os.listdir(project_dir) if f.endswith(".json")]
+            has_routes = any("routes" in f for f in json_files)
+            has_faqs = any("faqs" in f for f in json_files)
+            has_config = any("config" in f for f in json_files)
+            
+            projects.append({
+                "name": project_name,
+                "has_routes": has_routes,
+                "has_faqs": has_faqs,
+                "has_config": has_config,
+                "file_count": len(json_files),
+            })
+    return projects
+
+
+def _render_route_grid(routes, completed, faqs_file_path):
+    """Render route grid with clickable buttons to toggle completion status."""
+    # Wrap in styled container
+    st.markdown('<div class="route-grid-wrapper">', unsafe_allow_html=True)
+    
+    cols = st.columns(3)
+    for i, route in enumerate(routes):
+        name = os.path.basename(route)
+        is_done = route in completed
+        
+        with cols[i % 3]:
+            if is_done:
+                # Green button = completed, click to mark incomplete
+                if st.button(f"✅ {name}", key=f"route_{i}", use_container_width=True, help="Click to mark incomplete (will regenerate)"):
+                    # Remove from FAQs so it regenerates
+                    faq_data = _safe_load_json(faqs_file_path, {"faqs": []})
+                    faq_data["faqs"] = [f for f in faq_data["faqs"] if f.get("source_path") != route]
+                    _atomic_write_json(faqs_file_path, faq_data)
+                    if "completed_routes_on_load" in st.session_state:
+                        st.session_state.completed_routes_on_load = [
+                            r for r in st.session_state.completed_routes_on_load if r != route
+                        ]
+                    st.toast(f"🔄 {name} marked for regeneration")
+                    st.rerun()
+            else:
+                # Grey disabled button = pending
+                st.button(f"⬜ {name}", key=f"route_{i}", use_container_width=True, disabled=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -498,6 +581,143 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown("---")
+    
+    # Project Management
+    st.markdown("""<div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.12em;color:#444466;text-transform:uppercase;margin-bottom:12px">Project</div>""", unsafe_allow_html=True)
+    
+    # Load existing projects
+    existing_projects = _load_existing_projects()
+    project_names = [p["name"] for p in existing_projects]
+    
+    # Project selection (one session per project)
+    selected_project = st.selectbox(
+        "Load Existing Project",
+        options=[""] + project_names,
+        format_func=lambda x: f"{x}" if x else "New Project",
+        index=0
+    )
+    
+    # Handle project selection change - auto-clear fields immediately
+    if selected_project:
+        # Clear all input fields when a project is selected
+        if "folders_str" in st.session_state:
+            del st.session_state.folders_str
+        if "about" in st.session_state:
+            del st.session_state.about
+        if "project_context" in st.session_state:
+            del st.session_state.project_context
+        if "extra_prompt" in st.session_state:
+            del st.session_state.extra_prompt
+        if "routes_file" in st.session_state:
+            del st.session_state.routes_file
+        if "project_name" in st.session_state:
+            del st.session_state.project_name
+        
+        # Load the project's files
+        project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects", selected_project)
+        if os.path.exists(project_dir):
+            # Find routes and faqs files
+            routes_file = None
+            faqs_file = None
+            for filename in os.listdir(project_dir):
+                filepath = os.path.join(project_dir, filename)
+                if filename.endswith(".json"):
+                    if "routes" in filename:
+                        routes_file = filepath
+                    elif "faqs" in filename:
+                        faqs_file = filepath
+            
+            # Load both routes and FAQs to show progress UI
+            loaded_routes_data = None
+            loaded_faqs_data = None
+            
+            # Load routes file
+            if routes_file and os.path.exists(routes_file):
+                loaded_routes_data = _safe_load_json(routes_file, [])
+            
+            # Load FAQs file
+            if faqs_file and os.path.exists(faqs_file):
+                loaded_faqs_data = _safe_load_json(faqs_file, {"faqs": []})
+            
+            # Combine routes from both sources
+            all_routes = []
+            completed_routes_set = set()
+            
+            # Add routes from routes file
+            if loaded_routes_data and isinstance(loaded_routes_data, list):
+                for r in loaded_routes_data:
+                    if isinstance(r, str):
+                        all_routes.append(r)
+                    elif isinstance(r, dict) and "path" in r:
+                        all_routes.append(r["path"])
+                    elif isinstance(r, dict) and "file" in r:
+                        all_routes.append(r["file"])
+                    elif isinstance(r, dict) and "filepath" in r:
+                        all_routes.append(r["filepath"])
+            
+            # Extract completed routes from FAQs
+            if loaded_faqs_data and loaded_faqs_data.get("faqs"):
+                for faq in loaded_faqs_data.get("faqs", []):
+                    source_path = faq.get("source_path")
+                    if source_path and source_path not in completed_routes_set:
+                        completed_routes_set.add(source_path)
+                        # Add to all_routes if not already there
+                        if source_path not in all_routes:
+                            all_routes.append(source_path)
+            
+            if all_routes:
+                st.session_state.discovered_routes = all_routes
+                st.session_state.completed_routes_on_load = list(completed_routes_set)
+                
+                # Show status message
+                total = len(all_routes)
+                completed = len(completed_routes_set)
+                if completed > 0:
+                    st.success(f"✓ Loaded {selected_project}: {completed}/{total} routes completed")
+                else:
+                    st.success(f"✓ Loaded routes from {selected_project}")
+            
+            # Load project configuration (folders, mission, structure, etc.)
+            config_filepath = os.path.join(project_dir, f"{_get_project_slug(selected_project)}_config.json")
+            loaded_config = _load_project_config(config_filepath)
+            
+            if loaded_config:
+                # Restore all saved fields to session state
+                if "folders_str" in loaded_config:
+                    st.session_state.folders_str = loaded_config["folders_str"]
+                if "about" in loaded_config:
+                    st.session_state.about = loaded_config["about"]
+                if "project_context" in loaded_config:
+                    st.session_state.project_context = loaded_config["project_context"]
+                if "extra_prompt" in loaded_config:
+                    st.session_state.extra_prompt = loaded_config["extra_prompt"]
+                if "routes_file" in loaded_config:
+                    st.session_state.routes_file = loaded_config["routes_file"]
+        
+        # Pre-fill project name in main form
+        if "project_name" not in st.session_state or not st.session_state.project_name:
+            st.session_state.project_name = selected_project
+    
+    elif selected_project == "":
+        # User switched to "New Project" - clear session state
+        if "discovered_routes" in st.session_state:
+            del st.session_state.discovered_routes
+        if "completed_routes_on_load" in st.session_state:
+            del st.session_state.completed_routes_on_load
+        if "folders_str" in st.session_state:
+            del st.session_state.folders_str
+        if "about" in st.session_state:
+            del st.session_state.about
+        if "project_context" in st.session_state:
+            del st.session_state.project_context
+        if "extra_prompt" in st.session_state:
+            del st.session_state.extra_prompt
+        if "routes_file" in st.session_state:
+            del st.session_state.routes_file
+        if "project_name" in st.session_state:
+            del st.session_state.project_name
+    
     st.markdown("---")
     st.markdown("""<div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.12em;color:#444466;text-transform:uppercase;margin-bottom:12px">LLM Configuration</div>""", unsafe_allow_html=True)
 
@@ -591,13 +811,24 @@ extra_prompt = st.text_input(
 
 
 # ── Step 2 ────────────────────────────────────────────────────────────────────
-completed_routes = get_completed_routes()
+# Get project-specific file paths
+routes_file_path, faqs_file_path, config_file_path = _get_project_file_paths(project_name)
+
+# Determine completed routes - use loaded session data if available, otherwise check FAQs file
+_cr = st.session_state.get("completed_routes_on_load")
+completed_routes = list(_cr if _cr is not None else get_completed_routes(faqs_file_path))
 
 if "discovered_routes" not in st.session_state:
     st.session_state.discovered_routes = []
-    loaded = _safe_load_json("routes.json", default=None)
+    # Try to load from project-specific routes file first
+    loaded = _safe_load_json(routes_file_path, default=None)
     if loaded is not None and isinstance(loaded, list):
         st.session_state.discovered_routes = loaded
+    # Fallback to old location if project file doesn't exist
+    elif project_name:
+        old_loaded = _safe_load_json("routes.json", default=None)
+        if old_loaded is not None and isinstance(old_loaded, list):
+            st.session_state.discovered_routes = old_loaded
 
 num_done = len([r for r in st.session_state.discovered_routes if r in completed_routes])
 step2_done = len(st.session_state.discovered_routes) > 0
@@ -611,10 +842,18 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 routes_file = st.text_input(
-    "Router / Navigation Config File",
+    "Router / Navigation Config File (Optional)",
     value=st.session_state.get("routes_file", ""),
-    placeholder="/project/src/router/index.ts"
+    placeholder="/project/src/router/index.ts",
+    help="Leave empty for automatic detection. If provided, AI will use this file first."
 )
+
+# Show info if routes file is provided
+if routes_file.strip():
+    if os.path.exists(routes_file.strip()):
+        st.success(f"✓ Found: {os.path.basename(routes_file.strip())} ({os.path.getsize(routes_file.strip()):,} bytes)")
+    else:
+        st.error(f"✗ File not found: {routes_file}")
 
 # Validate routes file instantly
 has_routes_error = False
@@ -640,12 +879,18 @@ with c1:
     fetch_clicked = st.button("🔍  Discover Routes", type="primary", use_container_width=True, disabled=disable_fetch)
 with c2:
     if st.button("↺  Clear Routes", use_container_width=True):
-        if os.path.exists("routes.json"):
-            os.remove("routes.json")
+        if os.path.exists(routes_file_path):
+            os.remove(routes_file_path)
         st.session_state.discovered_routes = []
         st.rerun()
 with c3:
     if st.button("🗑  Clear All", use_container_width=True):
+        # Clear project-specific files
+        if os.path.exists(routes_file_path):
+            os.remove(routes_file_path)
+        if os.path.exists(faqs_file_path):
+            os.remove(faqs_file_path)
+        # Also clear old files if they exist
         for f in ("faqs.json", "routes.json", "stop_flag"):
             if os.path.exists(f):
                 os.remove(f)
@@ -670,6 +915,16 @@ if fetch_clicked:
         full_model = f"{provider}/{model_name}" if provider else model_name
 
         with st.spinner("Agent is scanning your codebase for routes..."):
+            # Log what we're passing to the agent
+            logger.info(f"🔍 Discover routes called with routes_file: {routes_file}")
+            if routes_file and routes_file.strip():
+                if os.path.exists(routes_file.strip()):
+                    logger.info(f"✓ Routes file exists: {routes_file.strip()}")
+                else:
+                    logger.warning(f"⚠️ Routes file does NOT exist: {routes_file.strip()}")
+            else:
+                logger.info("ℹ️ No routes file provided - AI will search automatically")
+            
             routes = discover_routes(
                 model=full_model,
                 api_key=api_key,
@@ -678,26 +933,62 @@ if fetch_clicked:
                 about=about,
                 project_context=project_context,
                 folders=folder_list,
-                routes_file=routes_file,
+                routes_file=routes_file.strip() if routes_file else None,
             )
+            
+            # Ensure routes is a list of strings (file paths), not dicts
+            if isinstance(routes, list):
+                cleaned_routes = []
+                for r in routes:
+                    if isinstance(r, dict):
+                        # Extract file path from dict if needed
+                        if "path" in r:
+                            cleaned_routes.append(r["path"])
+                        elif "file" in r:
+                            cleaned_routes.append(r["file"])
+                        elif "filepath" in r:
+                            cleaned_routes.append(r["filepath"])
+                        else:
+                            logger.warning(f"Skipping unknown dict format: {r}")
+                    elif isinstance(r, str):
+                        cleaned_routes.append(r)
+                    else:
+                        logger.warning(f"Skipping unknown type: {type(r)} - {r}")
+                routes = cleaned_routes
+            
             st.session_state.discovered_routes = routes
-            _atomic_write_json("routes.json", routes)
+            _atomic_write_json(routes_file_path, routes)
+            
+            # Save project configuration for future sessions
+            config_data = {
+                "folders_str": folders_str,
+                "about": about,
+                "project_context": project_context,
+                "extra_prompt": extra_prompt,
+                "routes_file": routes_file.strip() if routes_file else "",
+                "saved_at": datetime.now().isoformat(),
+            }
+            _save_project_config(config_file_path, config_data)
 
         if routes:
-            st.success(f"✓  Discovered **{len(routes)} routes** across your project.")
+            st.success(f"✓  Discovered **{len(routes)} routes** across your project. Saved to `{os.path.basename(routes_file_path)}`")
         else:
             st.warning("No routes found. Try adjusting your folder paths or project context.")
         st.rerun()
 
 # Route Status Grid
 if st.session_state.discovered_routes:
-    completed_routes = get_completed_routes()
-    _render_route_grid(st.session_state.discovered_routes, completed_routes)
+    _cr = st.session_state.get("completed_routes_on_load")
+    completed_routes_display = list(_cr if _cr is not None else get_completed_routes(faqs_file_path))
+    _render_route_grid(st.session_state.discovered_routes, completed_routes_display, faqs_file_path)
 
 
 # ── Step 3 ────────────────────────────────────────────────────────────────────
 step3_ready = len(st.session_state.discovered_routes) > 0
-faq_data_check = _safe_load_json("faqs.json", default=None)
+faq_data_check = _safe_load_json(faqs_file_path, default=None)
+# Fallback to old location if project file doesn't exist
+if not faq_data_check and project_name:
+    faq_data_check = _safe_load_json("faqs.json", default=None)
 total_faqs = len(faq_data_check.get("faqs", [])) if faq_data_check else 0
 
 st.markdown(f"""
@@ -731,11 +1022,12 @@ if run_gen:
 
         _clear_stop_flag()
 
-        completed_routes = get_completed_routes()
-        if skip_completed:
-            pending_routes = [r for r in st.session_state.discovered_routes if r not in completed_routes]
-        else:
-            pending_routes = st.session_state.discovered_routes
+        # Determine completed routes - use loaded session data or check FAQs file
+        _cr = st.session_state.get("completed_routes_on_load")
+        completed_routes = list(_cr if _cr is not None else get_completed_routes(faqs_file_path))
+        
+        # Always skip completed routes when generating (resume from where we left off)
+        pending_routes = [r for r in st.session_state.discovered_routes if r not in completed_routes]
 
         if not pending_routes:
             st.success("✓  All discovered routes are already complete!")
@@ -755,9 +1047,12 @@ if run_gen:
 
             progress_bar = st.progress(0)
             status_placeholder = st.empty()
-            route_grid_placeholder = st.empty()
             failed_routes = []
             current_completed = list(completed_routes)
+            
+            # Update session state as we complete routes (for real-time UI updates)
+            if "completed_routes_on_load" not in st.session_state:
+                st.session_state.completed_routes_on_load = []
 
             for idx, route in enumerate(pending_routes):
                 if _is_stopped():
@@ -765,17 +1060,10 @@ if run_gen:
                     st.warning("🛑  Generation stopped by user.")
                     break
 
-                # Render active grid
-                with route_grid_placeholder.container():
-                    _render_route_grid(
-                        st.session_state.discovered_routes,
-                        current_completed,
-                        active=route
-                    )
-
+                # Show simple status indicator (no duplicate grid)
                 status_placeholder.markdown(
                     f"<div style='font-size:0.85rem;color:#5050a0;font-family:DM Mono,monospace;padding:6px 0'>"
-                    f"⚡ Analyzing <strong>{os.path.basename(route)}</strong> &nbsp;·&nbsp; "
+                    f"⚡ Processing <strong>{os.path.basename(route)}</strong> &nbsp;·&nbsp; "
                     f"{idx+1} / {len(pending_routes)}</div>",
                     unsafe_allow_html=True
                 )
@@ -795,7 +1083,7 @@ if run_gen:
                         max_loops=max_loops,
                     )
 
-                    current_all = _safe_load_json("faqs.json", default={"faqs": []})
+                    current_all = _safe_load_json(faqs_file_path, default={"faqs": []})
                     if "faqs" not in current_all:
                         current_all["faqs"] = []
 
@@ -803,9 +1091,14 @@ if run_gen:
                         for faq in new_data["faqs"]:
                             faq["source_path"] = route
                         current_all["faqs"].extend(new_data["faqs"])
-                        _atomic_write_json("faqs.json", current_all)
+                        _atomic_write_json(faqs_file_path, current_all)
                         current_completed.append(route)
-                        logger.info(f"✅ Saved {len(new_data['faqs'])} FAQs for {os.path.basename(route)}")
+                        
+                        # Update session state for real-time UI refresh
+                        if route not in st.session_state.completed_routes_on_load:
+                            st.session_state.completed_routes_on_load.append(route)
+                        
+                        logger.info(f"✅ Saved {len(new_data['faqs'])} FAQs for {os.path.basename(route)} to `{os.path.basename(faqs_file_path)}`")
                     else:
                         logger.warning(f"⚠️ No FAQs generated for {os.path.basename(route)}")
 
@@ -817,10 +1110,6 @@ if run_gen:
                 progress_bar.progress((idx + 1) / len(pending_routes))
 
             status_placeholder.empty()
-
-            # Final grid with all completed
-            with route_grid_placeholder.container():
-                _render_route_grid(st.session_state.discovered_routes, get_completed_routes())
 
             if failed_routes:
                 st.warning(
@@ -835,7 +1124,11 @@ if run_gen:
 
 
 # ── Results Panel ─────────────────────────────────────────────────────────────
-faq_data = _safe_load_json("faqs.json", default=None)
+faq_data = _safe_load_json(faqs_file_path, default=None)
+# Fallback to old location if project file doesn't exist
+if not faq_data and project_name:
+    faq_data = _safe_load_json("faqs.json", default=None)
+
 if faq_data is not None:
     faqs = faq_data.get("faqs", [])
 
@@ -845,7 +1138,7 @@ if faq_data is not None:
         categories = sorted(set(f.get("category", "General") for f in faqs))
         sources = sorted(set(f.get("source", "") for f in faqs if f.get("source")))
 
-        # Stats bar
+        # Stats bar with file info
         st.markdown(f"""
         <div class="stats-bar">
             <div class="stat-cell">
@@ -864,6 +1157,9 @@ if faq_data is not None:
                 <div class="stat-val">{len(st.session_state.discovered_routes)}</div>
                 <div class="stat-key">Routes Scanned</div>
             </div>
+        </div>
+        <div style="font-size:0.75rem;color:#8080b0;font-family:'DM Mono',monospace;text-align:center;padding:0.5rem">
+            📁 Data from: {os.path.basename(faqs_file_path)}
         </div>
         """, unsafe_allow_html=True)
 
@@ -922,15 +1218,18 @@ if faq_data is not None:
         st.markdown("---")
         d1, d2 = st.columns(2)
 
+        # Use project name in filename
+        download_filename_base = f"{_get_project_slug(project_name) if project_name else 'faq'}"
+        
         d1.download_button(
             "📥  Download JSON",
             data=json.dumps(faq_data, indent=2),
-            file_name=f"{project_name or 'faq'}_faqs.json",
+            file_name=f"{download_filename_base}_faqs.json",
             mime="application/json",
             use_container_width=True
         )
 
-        md_output = f"# {project_name} — FAQ\n\n"
+        md_output = f"# {project_name or 'FAQ'} — Documentation\n\n"
         md_output += f"*{len(faqs)} questions across {len(categories)} categories*\n\n---\n\n"
         for cat in categories:
             cat_faqs = [f for f in faqs if f.get("category", "General") == cat]
@@ -942,7 +1241,7 @@ if faq_data is not None:
         d2.download_button(
             "📥  Download Markdown",
             data=md_output,
-            file_name=f"{project_name or 'faq'}_faqs.md",
+            file_name=f"{download_filename_base}_faqs.md",
             mime="text/markdown",
             use_container_width=True
         )

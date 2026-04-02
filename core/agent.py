@@ -166,19 +166,27 @@ def discover_routes(
     project_context,
     folders,
     routes_file,
-    max_loops=8,
+    max_loops=15,
     temperature=0.2,
 ):
     routes_raw = ""
     if routes_file and os.path.isfile(routes_file):
+        logger.info(f"📄 Reading user-provided routes file: {routes_file}")
         try:
             with open(routes_file, "r", encoding="utf-8") as f:
+                content = f.read()  # Read ENTIRE file - no limit!
                 routes_raw = (
                     f"\n\nUser-provided Routes File Content (Manifest):\n"
-                    f"```\n{f.read()[:30000]}\n```"
+                    f"```\n{content}\n```"
                 )
+                logger.info(f"✓ Successfully read routes file ({len(content):,} chars)")
         except (OSError, IOError) as e:
-            logger.warning(f"Could not read routes file: {e}")
+            logger.error(f"❌ Could not read routes file: {e}")
+            routes_raw = ""
+    elif routes_file:
+        logger.warning(f"⚠️ Routes file provided but doesn't exist: {routes_file}")
+    else:
+        logger.info("ℹ️ No routes file provided - will search automatically")
 
     if project_context and project_context.strip():
         context_section = f"""PROJECT STRUCTURE & CONTEXT (provided by user):
@@ -188,6 +196,45 @@ def discover_routes(
 No description was provided. You MUST use `list_dir` to explore the target folders.
 Start broad, then drill into subdirectories to understand the layout."""
 
+    # Add instruction to search for route files if not provided
+    route_file_search_instruction = ""
+    if routes_raw:
+        # User provided a file - emphasize using it
+        route_file_search_instruction = """
+📁 USER HAS PROVIDED A ROUTES FILE - IT'S IN YOUR PROMPT ABOVE!
+
+The file content is included as "User-provided Routes File Content (Manifest)".
+This could be a menu JSON, routes config, or navigation file.
+YOUR JOB: Parse it and extract ALL page/file paths mentioned in it.
+
+Look for patterns like:
+- Component imports: `() => import('@/pages/Masters/Charge/Index.vue')`
+- Route paths: `{ path: '/charge', component: ... }`
+- Menu items: `{ title: 'Charge', icon: '...', route: '...' }`
+- Any references to .vue, .tsx, .jsx, .py files
+
+EXTRACT all absolute file paths and return as JSON array.
+"""
+    else:
+        # No file provided - search automatically
+        route_file_search_instruction = """
+CRITICAL WORKFLOW - FOLLOW THESE STEPS IN ORDER:
+
+STEP 1 (Quick Scan): Search for route/navigation configuration files.
+Look for: router/index.ts, routes.ts, navigation.ts, app-routing.module.ts, etc.
+Check: /src/router/, /src/routes/, /app/router/, /config/
+Use list_dir to find these files FAST.
+
+STEP 2 (If Found): Use read_file to examine the route config file.
+Extract ALL route paths from it. Return the JSON array immediately.
+
+STEP 3 (If NOT Found): Don't waste time - go directly to target folders.
+Use list_dir on each target folder to find page files (.vue, .tsx, .jsx, .py).
+Focus on pages/, views/, screens/, components/ directories.
+
+TIME LIMIT: Complete this in max 10 iterations. Be efficient!
+"""
+
     system_prompt = f"""You are a Senior Architect analyzing the '{project_name}' project.
 PROJECT MISSION:
 {about if about else 'Not specified — infer from codebase.'}
@@ -196,21 +243,36 @@ PROJECT MISSION:
 
 TARGET FOLDERS TO EXPLORE: {', '.join(folders)}
 {routes_raw}
+{route_file_search_instruction}
 
-YOU HAVE TOOLS: Use `list_dir` to explore folders and verify which files exist.
+{'='*60}
+⚠️ CRITICAL INSTRUCTION - READ THIS FIRST: ⚠️
 
-YOUR APPROACH:
-1. Use `list_dir` on each target folder to see its contents.
-2. Drill into subdirectories to find page/component files.
-3. Identify ALL key files (.vue, .tsx, .jsx, .py, .ts, etc.) that represent unique end-user features.
+A user-provided routes file WAS included above (see "User-provided Routes File Content").
+YOUR TASK: Extract ALL file paths from THAT file.
+DO NOT ignore it. DO NOT explore randomly.
+The file content is RIGHT THERE in your prompt - USE IT!
+
+IF USER FILE EXISTS:
+→ Parse it and extract all route/page file paths
+→ Return them as JSON array immediately
+→ DONE (no need to explore further)
+
+IF NO USER FILE (only then):
+→ Search for router/index.ts, routes.ts, etc.
+→ If still not found, explore target folders for .vue/.tsx/.jsx files
+
+{'='*60}
+
+YOU HAVE TOOLS: 
+- `list_dir`: Use ONLY if no user file provided
+- `read_file`: Use to examine specific files if needed
 
 OUTPUT FORMAT:
-Output a PURE JSON list of absolute file paths:
-[
-  "/path/to/Page1.vue",
-  "/path/to/Page2.vue"
-]
-Only output the JSON array. Do not hallucinate paths — verify with list_dir.
+["/absolute/path/to/Page1.vue", "/absolute/path/to/Page2.vue"]
+Return ONLY the JSON array, nothing else.
+
+REMEMBER: If user provided a file above, JUST USE IT and return results!
 """
     messages = [
         {"role": "system", "content": system_prompt},
