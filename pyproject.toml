@@ -1,7 +1,7 @@
 [project]
 name = "airoutes"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agentic AI tool that autonomously explores codebases to generate end-user FAQ documentation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,4 +1,7 @@
-streamlit==1.32.0
-openai==1.14.0
-pydantic==2.6.3
-python-dotenv==1.0.1
+# This file is kept for compatibility with pip-based workflows.
+# The canonical dependency source is pyproject.toml (managed by uv).
+# Regenerate with: uv pip compile pyproject.toml -o requirements.txt
+litellm>=1.83.0
+pydantic>=2.12.5
+python-dotenv>=1.2.2
+streamlit>=1.56.0
