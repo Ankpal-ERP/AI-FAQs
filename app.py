@@ -722,7 +722,7 @@ with st.sidebar:
     st.markdown("""<div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.12em;color:#444466;text-transform:uppercase;margin-bottom:12px">LLM Configuration</div>""", unsafe_allow_html=True)
 
     provider = st.text_input(
-        "Provider",
+        "Provider (Optional if prefix used in Model)",
         placeholder="openai · anthropic · ollama",
         help="LiteLLM prefix (e.g. `ollama` or `ollama_chat` for local Ollama). Leave blank only if Model already includes the provider (e.g. `openai/gpt-4o`).",
     )
@@ -732,9 +732,9 @@ with st.sidebar:
         placeholder="gpt-4o · llama3 · gpt-oss:latest",
         help="For Ollama: use the exact tag from `ollama list` (e.g. `gpt-oss:latest`). Do not use `openai/…` here—it is combined with Provider and becomes an invalid Ollama model name.",
     )
-    api_key = st.text_input("API Key *", type="password", placeholder="sk-...")
+    api_key = st.text_input("API Key (if required)", type="password", placeholder="sk-...")
     api_base = st.text_input(
-        "API Base URL *",
+        "API Base URL (if required)",
         placeholder="http://localhost:1234/v1",
         help="OpenAI-compatible proxies: e.g. LM Studio. For Ollama via LiteLLM, default is http://localhost:11434 if left empty where supported.",
     )
@@ -881,10 +881,7 @@ if routes_file.strip():
 c1, c2, c3 = st.columns([2, 1, 1])
 with c1:
     missing_required = not all([
-        provider.strip(),
         model_name.strip(),
-        api_key.strip(),
-        api_base.strip(),
         project_name.strip(),
         about.strip()
     ])
@@ -925,7 +922,14 @@ if fetch_clicked:
         from core.agent import discover_routes
 
         folder_list = [p.strip() for p in folders_str.split("\n") if p.strip()]
-        full_model = f"{provider}/{model_name}" if provider else model_name
+        p_val = provider.strip().lower()
+        m_val = model_name.strip()
+        if p_val == "lm_studio":
+            full_model = f"openai/{m_val}" if "/" not in m_val else m_val
+        elif p_val:
+            full_model = f"{p_val}/{m_val}" if not m_val.startswith(f"{p_val}/") else m_val
+        else:
+            full_model = m_val
 
         with st.spinner("Agent is scanning your codebase for routes..."):
             # Log what we're passing to the agent
@@ -1045,7 +1049,14 @@ if run_gen:
         if not pending_routes:
             st.success("✓  All discovered routes are already complete!")
         else:
-            full_model = f"{provider}/{model_name}" if provider else model_name
+            p_val = provider.strip().lower()
+            m_val = model_name.strip()
+            if p_val == "lm_studio":
+                full_model = f"openai/{m_val}" if "/" not in m_val else m_val
+            elif p_val:
+                full_model = f"{p_val}/{m_val}" if not m_val.startswith(f"{p_val}/") else m_val
+            else:
+                full_model = m_val
             folder_list = [p.strip() for p in folders_str.split("\n") if p.strip()]
 
             st.markdown("---")
