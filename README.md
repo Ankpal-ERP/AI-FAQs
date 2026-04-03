@@ -74,6 +74,3 @@ Access the dashboard at `http://localhost:8501`.
 - **Model Selection**: For best results in code analysis, use high-reasoning models like `gpt-4o`, `claude-3-5-sonnet`, or `gemini-1.5-pro`.
 - **Context Description**: Providing a brief "Project Structure Description" in Step 1 significantly reduces discovery time.
 - **Route Manifests**: If your project has a central `router.ts` or `menu.json`, providing its path in Step 2 ensures 100% discovery accuracy.
-
----
-*Created by the Ankpal-ERP Team · Powered by Agentic AI*
