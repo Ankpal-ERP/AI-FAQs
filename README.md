@@ -43,7 +43,7 @@ Access the dashboard at `http://localhost:8501`.
 
 ## 📖 Usage Guide
 
-1. **Configure LLM**: Set your provider (e.g., `openai`, `gemini`), model name, and API details in the sidebar.
+1. **Configure LLM**: Set your provider (e.g., `openai`, `gemini`), model name, and API details in the sidebar. For **Ollama**, use Provider `ollama` or `ollama_chat` and Model exactly as in `ollama list` (e.g. `gpt-oss:latest`). Do not put `openai/…` in the Model field when using an Ollama provider—that builds ids like `ollama_chat/openai/gpt-oss`, which Ollama does not recognize.
 2. **Setup Project**:
    - Provide a **Project Name** (this creates a persistent session).
    - Define the **Project Mission** (helps the AI understand the business context).

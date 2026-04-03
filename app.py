@@ -721,10 +721,23 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""<div style="font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.12em;color:#444466;text-transform:uppercase;margin-bottom:12px">LLM Configuration</div>""", unsafe_allow_html=True)
 
-    provider = st.text_input("Provider", placeholder="openai · anthropic · ollama")
-    model_name = st.text_input("Model *", value="openai/qwen", placeholder="gpt-4o · llama3")
+    provider = st.text_input(
+        "Provider",
+        placeholder="openai · anthropic · ollama",
+        help="LiteLLM prefix (e.g. `ollama` or `ollama_chat` for local Ollama). Leave blank only if Model already includes the provider (e.g. `openai/gpt-4o`).",
+    )
+    model_name = st.text_input(
+        "Model *",
+        value="openai/qwen",
+        placeholder="gpt-4o · llama3 · gpt-oss:latest",
+        help="For Ollama: use the exact tag from `ollama list` (e.g. `gpt-oss:latest`). Do not use `openai/…` here—it is combined with Provider and becomes an invalid Ollama model name.",
+    )
     api_key = st.text_input("API Key *", type="password", placeholder="sk-...")
-    api_base = st.text_input("API Base URL *", placeholder="http://localhost:1234/v1")
+    api_base = st.text_input(
+        "API Base URL *",
+        placeholder="http://localhost:1234/v1",
+        help="OpenAI-compatible proxies: e.g. LM Studio. For Ollama via LiteLLM, default is http://localhost:11434 if left empty where supported.",
+    )
 
     st.markdown("---")
 
